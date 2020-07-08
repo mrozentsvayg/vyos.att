@@ -255,7 +255,7 @@ vyos@vyos# show nat source rule 100
 ```
 
 ## Credits
-- [reddit.com/user/Streiw/](https://www.reddit.com/r/ATT/comments/g59rwm/bgw210700_root_exploitbypass/) - all of it could not be possible without the certificates.
+- [reddit.com/user/Streiw/](https://www.reddit.com/r/ATT/comments/g59rwm/bgw210700_root_exploitbypass/) - none of this would be possible without extracted certificates.
 - [Sergey (devicelocksmith)](https://www.devicelocksmith.com/2018/12/eap-tls-credentials-decoder-for-nvg-and.html) - excellent decoder and WPA configuration helper.
 - [https://github.com/bypassrg/att](https://github.com/bypassrg/att) - for inspiration to clearly document platform specific configuration and share it with community.
 
