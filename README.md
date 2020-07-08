@@ -70,7 +70,18 @@ iface eth3.0 inet dhcp
 wpa-driver wired
 wpa-conf /config/auth/att/wpa_supplicant.conf
 ```
-- [**NB!**] Direct configuration would persist reboots, but would **not** survive the VyOS upgrade (only VyOS configuration is guaranteed to be saved). All the configuration outside of VyOS configuration shell should be saved and reapplied as needed. This is also applicable to direct configuration of some files in [IPv6 section](#ipv6-configuration).
+- [**NB!**] Direct configuration would persist reboots, but would **not** survive the VyOS upgrade (only VyOS configuration is guaranteed to be saved). All the configuration outside of VyOS configuration shell should be saved and reapplied as needed. This is also applicable to direct configuration of some files in [IPv6 section](#ipv6-configuration). See the list of files, suggested to be changed: [List of directly modified files](#list-of-directly-modified-files).
+- NAT configuration is standard:
+```
+vyos@vyos# show nat source rule 100
+ outbound-interface eth3.0
+ source {
+     address 192.168.0.0/16
+ }
+ translation {
+     address masquerade
+ }
+```
 - [Tips] Occasionally, the interfaces in linux could get renumbered because of the MAC changes, eg. eth3 -> eth4 after the reboot. I recommend to "stick" the interface in udev, eg. creating the `/etc/udev/rules.d/70-persistent-net.rules` file with following content:
 ```
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="yy:yy:yy:yy:yy:yy", ATTR{type}=="1", KERNEL=="eth*", NAME="eth3"
@@ -212,16 +223,43 @@ rtt min/avg/max/mdev = 4.479/4.507/4.535/0.028 ms
 [Up](#table-of-contents)
 
 ## Miscellaneous
-### List of directly modifies files (useful to backup seprately):
+### Firewall
+Please do not forget that your router would start to be exposed to the public internet. Please, make sure your firewall is configured as needed and sshd is either not exposed at all, or is using public keys only, or the default password has been changed to very long generated one.
+
+### Tuning/optimizations
+This is out of the scope of this guide, but in some cases additional configuration is needed to achieve the RG reference performance.
+Example - Protectli FW4B was not able to achieve more than 500-600 Mbit using `eth3` interface for WAN.
+The bottleneck happened because it was only using 1 core (out of 4) and by default the `eth2/eth3` ethernet interfaces was only using 1 queue.
+
+Ethernet I210 is supporting 4 combined queues, to permanently (surviving reboots) fix, add `ethtool -L eth3 combined 4` to `/config/scripts/vyos-postconfig-bootup.script`. (`ethtool -G eth3 tx 4096 rx 4096` wouldn't hurt as well).
+
+### List of directly modified files
+Besides the VyOS configuration, it's useful to backup:
 - `/config/auth/att` - certificates and wpa configuration
 - `/etc/network/interfaces` - wired wpa_supplicant
+- `/etc/udev/rules.d/70-persistent-net.rules` - to stick interface names
 - `/usr/share/vyos/templates/dhcp-client/ipv6.tmpl` - NA/PD values for IPv6
+- `/config/scripts/vyos-postconfig-bootup.script` - ethtool etc.
 
+### AT&T public subnet
+You can get public /29 subnet for $15/mo. In case you find it appealing, it's only sufficient to configure the translation address in NAT (pick any of 6 available addresses for different rules or use all of them as a range):
+```
+vyos@vyos# show nat source rule 100
+ outbound-interface eth3.0
+ source {
+     address 192.168.0.0/16
+ }
+ translation {
+     address <YOUR_PUBLIC_IP>
+ }
+```
 
 [Up](#table-of-contents)
 
+
 ## Credits
 - [reddit.com/user/Streiw/](https://www.reddit.com/r/ATT/comments/g59rwm/bgw210700_root_exploitbypass/) - all of it could not be possible without the certificates.
-- [Sergey (devicelocksmith)](https://www.devicelocksmith.com/2018/12/eap-tls-credentials-decoder-for-nvg-and.html) - excellent WPA configuration helper
-- [https://github.com/bypassrg/att](https://github.com/bypassrg/att) - for inspiration to clearly document platform specific configuration and share it with community
+- [Sergey (devicelocksmith)](https://www.devicelocksmith.com/2018/12/eap-tls-credentials-decoder-for-nvg-and.html) - excellent decoder and WPA configuration helper.
+- [https://github.com/bypassrg/att](https://github.com/bypassrg/att) - for inspiration to clearly document platform specific configuration and share it with community.
+
 [Up](#table-of-contents)
