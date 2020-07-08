@@ -53,7 +53,7 @@ it'll likely not work.
 ### VyOS configuration
 - Unpack generated `EAP-TLS_8021x_xxxxxx-xxxxxxxxxxxxxx.tar.gz` and copy 3 pem files along with `wpa_supplicant.conf` to the VyOS router. I've used `/config/auth/att/` directory.
 - [Optional] Make sure the RG MAC addresss matches to what has been extracted and configured in `wpa_supplicant.conf`.
-- Configure WAN/ONT interface to use the RG MAC address 3 (three) times in the following configuration snippet (AT&T DHCP would not respond to any other MAC address). Also, please note, the ONT port is `eth3` in my example, but in most cases WAN `eth0` port will be used instead.
+- Configure WAN/ONT interface to use the RG MAC address 3 (three) times in the following configuration snippet (AT&T DHCP would not respond to any other MAC address. In addition, the DHCP request should be coming in VLAN 0). Also, please note, the ONT port is `eth3` in my example, but in most cases WAN `eth0` port will be used instead.
 ```
 vyos@vyos# show interfaces ethernet eth3
  hw-id xx:xx:xx:xx:xx:xx
