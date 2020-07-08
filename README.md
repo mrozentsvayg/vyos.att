@@ -70,7 +70,7 @@ iface eth3.0 inet dhcp
 wpa-driver wired
 wpa-conf /config/auth/att/wpa_supplicant.conf
 ```
-
+- [**NB!**] Direct configuration would persist reboots, but would **not** survive the VyOS upgrade (only VyOS configuration is guaranteed to be saved). All the configuration outside of VyOS configuration shell should be saved and reapplied as needed. This is also applicable to direct configuration of some files in [IPv6 section](#ipv6-configuration).
 - [Tips] Occasionally, the interfaces in linux could get renumbered because of the MAC changes, eg. eth3 -> eth4 after the reboot. I recommend to "stick" the interface in udev, eg. creating the `/etc/udev/rules.d/70-persistent-net.rules` file with following content:
 ```
 SUBSYSTEM=="net", ACTION=="add", DRIVERS=="?*", ATTR{address}=="yy:yy:yy:yy:yy:yy", ATTR{type}=="1", KERNEL=="eth*", NAME="eth3"
@@ -82,12 +82,146 @@ To debug, look into `/var/log/messages` and/or run `wpa_supplicant` manually:
 sudo /usr/sbin/wpa_supplicant  -Dwired -ieth3.0 -c /config/auth/wpa_supplicant.conf -ddd
 ```
 
-[Up]([#table-of-contents)
+[Up](#table-of-contents)
 
 ## IPv6 configuration
+### DUID
+DUID configuration is essential to configure IPv6. AT&T would not respond without expected information in DUID. The easiest is to use the AT&T RG `dhcp6c_duid` file. `dhcp6c` is implicitely using, if the file resides in the right place. In VyOS the location is `/var/lib/dhcpv6/dhcp6c_duid`. The size is 29 bytes in my case.
+### IA-NA/IA-PD
+VyOS is hardcoding values for NA=1, PD=2 in the [template](https://github.com/vyos/vyos-1x/blob/current/data/templates/dhcp-client/ipv6.tmpl) used to generate the `dhcp6c` configuration file (eg. `/run/dhcp6c/dhcp6c.eth3.0.conf`). With these values, AT&T has never responded with IPv6 addresses.
+However, NA=0, PD=1 are working flawlessly for me. The following direct change of `/usr/share/vyos/templates/dhcp-client/ipv6.tmpl` file required:
+```
+vyos@vyos# diff -u <(curl https://raw.githubusercontent.com/vyos/vyos-1x/current/data/templates/dhcp-client/ipv6.tmpl) /usr/share/vyos/templates/dhcp-client/ipv6.tmpl
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   964  100   964    0     0  14830      0 --:--:-- --:--:-- --:--:-- 14830
+--- /dev/fd/63	2020-07-07 18:35:58.543053367 -0700
++++ /usr/share/vyos/templates/dhcp-client/ipv6.tmpl	2020-07-03 13:05:52.856329465 -0700
+@@ -8,21 +8,21 @@
+     information-only;
+ {%  endif %}
+ {%  if not dhcpv6_temporary %}
+-    send ia-na 1; # non-temporary address
++    send ia-na 0; # non-temporary address
+ {%  endif %}
+ {%  if dhcpv6_pd_interfaces %}
+-    send ia-pd 2; # prefix delegation
++    send ia-pd 1; # prefix delegation
+ {%  endif %}
+ };
+
+ {%  if not dhcpv6_temporary %}
+-id-assoc na 1 {
++id-assoc na 0 {
+     # Identity association NA
+ };
+ {%  endif %}
+
+ {%  if dhcpv6_pd_interfaces %}
+-id-assoc pd 2 {
++id-assoc pd 1 {
+ {%  if dhcpv6_pd_length %}
+     prefix ::/{{ dhcpv6_pd_length }} infinity;
+ {%  endif %}
+```
+
+### dhcp6c configuration
+Having proper `dhcp6c` NA/PD configured, the following configuration is straightforward enough:
+```
+vyos@vyos# show interfaces ethernet eth3
+ hw-id xx:xx:xx:xx:xx:xx
+ mac xx:xx:xx:xx:xx:xx
+ vif 0 {
+     address dhcp
+     address dhcpv6
+     dhcpv6-options {
+         prefix-delegation {
+             interface eth1 {
+                 sla-id 1
+                 sla-len 4
+             }
+             length 60
+         }
+     }
+     mac xx:xx:xx:xx:xx:xx
+ }
+```
+... except `sla-len`. Please note, that AT&T currently allocates /60 prefixes. It leaves 4 bits for SLA. If not configured correctly, the following error would occur:
+```
+add_ifprefix: invalid prefix length 60 + 16 + 64
+```
+Note, the configuration above is configuring `eth1` port for the prefix delegation (LAN port). If your setup is different, please adjust.
+
+### RA
+Trivial (again, `eth1` for the prefix delegation):
+```
+vyos@vyos# show service router-advert
+ interface eth1 {
+     prefix ::/64 {
+     }
+     reachable-time 0
+     retrans-timer 0
+ }
+```
+
+### Debugging
+To debug, `dhcp6c` could be run manually (you can specify any experimental config):
+```
+sudo /usr/sbin/dhcp6c -D -f -c /run/dhcp6c/dhcp6c.eth3.0.conf eth3.0
+```
+To verify DUID being properly obtained and used:
+```
+Jul/02/2020 12:28:53: get_duid: extracted an existing DUID from /var/lib/dhcpv6/dhcp6c_duid: 00:02:00:00:xx:xx............
+```
+Output for NA:
+```
+Jul/02/2020 12:28:54: dhcp6_get_options: get DHCP option client ID, len 27
+Jul/02/2020 12:28:54:   DUID: 00:02:00:00:xx:xx............
+Jul/02/2020 12:28:54: dhcp6_get_options: get DHCP option identity association, len 40
+Jul/02/2020 12:28:54:   IA_NA: ID=1, T1=1800, T2=2880
+Jul/02/2020 12:28:54: copyin_option: get DHCP option IA address, len 24
+Jul/02/2020 12:28:54: copyin_option:   IA_NA address: 2001:xxx:xxxx:xxx::1 pltime=3600 vltime=3600
+```
+PD:
+```
+Jul/02/2020 12:28:54: dhcp6_get_options: get DHCP option client ID, len 27
+Jul/02/2020 12:28:54:   DUID: 00:02:00:00:xx:xx............
+Jul/02/2020 12:28:54: dhcp6_get_options: get DHCP option IA_PD, len 41
+Jul/02/2020 12:28:54:   IA_PD: ID=1, T1=1800, T2=2880
+Jul/02/2020 12:28:54: copyin_option: get DHCP option IA_PD prefix, len 25
+Jul/02/2020 12:28:54: copyin_option:   IA_PD prefix: 2600:xxxx:xxxx:xxx0::/60 pltime=3600 vltime=3600
+```
+To verify IPv6 from the router:
+```
+vyos@vyos# show interfaces ethernet eth1 ipv6
+ address {
+     autoconf
+ }
+vyos@vyos# ip -6 addr show dev eth1 | egrep inet6 | awk -F ' +|/' '{print $3}' | egrep 2600:
+2600:xx:xx:xx...xx
+vyos@vyos# ping6 -c 2 -I 2600:xx:xx:xx...xx google.com
+PING google.com(sfo03s07-in-x0e.1e100.net (2607:f8b0:4005:808::200e)) from 2600:xx:xx:xx...xx : 56 data bytes
+64 bytes from sfo03s07-in-x0e.1e100.net (2607:f8b0:4005:808::200e): icmp_seq=1 ttl=119 time=4.54 ms
+64 bytes from sfo03s07-in-x0e.1e100.net (2607:f8b0:4005:808::200e): icmp_seq=2 ttl=119 time=4.48 ms
+
+--- google.com ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 3ms
+rtt min/avg/max/mdev = 4.479/4.507/4.535/0.028 ms
+```
+
+[Up](#table-of-contents)
 
 ## Miscellaneous
+### List of directly modifies files (useful to backup seprately):
+- `/config/auth/att` - certificates and wpa configuration
+- `/etc/network/interfaces` - wired wpa_supplicant
+- `/usr/share/vyos/templates/dhcp-client/ipv6.tmpl` - NA/PD values for IPv6
+
+
+[Up](#table-of-contents)
 
 ## Credits
-- [reddit.com/user/Streiw/](https://www.reddit.com/r/ATT/comments/g59rwm/bgw210700_root_exploitbypass/) - all this could not be possible without certificates
+- [reddit.com/user/Streiw/](https://www.reddit.com/r/ATT/comments/g59rwm/bgw210700_root_exploitbypass/) - all of it could not be possible without the certificates.
 - [Sergey (devicelocksmith)](https://www.devicelocksmith.com/2018/12/eap-tls-credentials-decoder-for-nvg-and.html) - excellent WPA configuration helper
+- [https://github.com/bypassrg/att](https://github.com/bypassrg/att) - for inspiration to clearly document platform specific configuration and share it with community
+[Up](#table-of-contents)
